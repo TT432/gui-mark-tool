@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>纹理元素标注工具</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+
+        .left-panel {
+            flex: 1;
+            background-color: #fff;
+            border-right: 1px solid #ddd;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .canvas-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            cursor: none;
+            overflow: hidden;
+        }
+
+        .canvas-container.no-image {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border: 2px dashed #ccc;
+            margin: 20px;
+            height: calc(100% - 40px);
+        }
+
+        .upload-hint {
+            color: #666;
+            font-size: 18px;
+            text-align: center;
+        }
+
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            image-rendering: pixelated;
+            image-rendering: -moz-crisp-edges;
+            image-rendering: crisp-edges;
+        }
+
+        .right-panel {
+            width: 300px;
+            background-color: #fff;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .panel-title {
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        .element-list {
+            margin-bottom: 20px;
+        }
+
+        .element-item {
+            background-color: #f9f9f9;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            padding: 10px;
+            margin-bottom: 8px;
+            font-size: 12px;
+            position: relative;
+        }
+
+        .element-item:hover {
+            background-color: #f0f0f0;
+            border-color: #ccc;
+        }
+
+        .element-item.highlighted {
+            background-color: #e3f2fd;
+            border-color: #2196f3;
+        }
+
+        .element-name {
+            font-weight: bold;
+            margin-bottom: 5px;
+            cursor: pointer;
+            padding: 2px 4px;
+            border-radius: 2px;
+        }
+
+        .element-name:hover {
+            background-color: #e0e0e0;
+        }
+
+        .element-name input {
+            border: none;
+            background: transparent;
+            font-weight: bold;
+            font-size: 12px;
+            width: 100%;
+            outline: none;
+        }
+
+        .element-coords {
+            color: #666;
+            margin-bottom: 3px;
+        }
+
+        .delete-btn {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background-color: #ff4444;
+            color: white;
+            border: none;
+            border-radius: 2px;
+            width: 16px;
+            height: 16px;
+            font-size: 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .delete-btn:hover {
+            background-color: #cc0000;
+        }
+
+        .json-output {
+            margin-top: 20px;
+        }
+
+        .json-textarea {
+            width: 100%;
+            height: 120px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 11px;
+            resize: vertical;
+            background-color: #f9f9f9;
+        }
+
+        .copy-btn {
+            margin-top: 8px;
+            background-color: #2196f3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .copy-btn:hover {
+            background-color: #1976d2;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .pixel-highlight {
+            position: absolute;
+            pointer-events: none;
+            background-color: rgba(255, 255, 0, 0.3);
+            border: 0.3px solid rgba(255, 255, 0, 1);
+            z-index: 10;
+        }
+
+        .annotation-rect {
+            position: absolute;
+            pointer-events: none;
+            background-color: rgba(0, 123, 255, 0.3);
+            border: 1px solid rgba(0, 123, 255, 0.6);
+            z-index: 5;
+        }
+
+        .annotation-rect.highlighted {
+            background-color: rgba(255, 193, 7, 0.4);
+            border-color: rgba(255, 193, 7, 0.8);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="left-panel">
+            <div class="canvas-container no-image" id="canvasContainer">
+                <div class="upload-hint">点击或拖拽图片加载</div>
+                <canvas id="canvas" style="display: none;"></canvas>
+                <input type="file" id="fileInput" class="file-input" accept="image/*">
+            </div>
+        </div>
+        
+        <div class="right-panel">
+            <div class="panel-title">标记列表</div>
+            <div class="element-list" id="elementList">
+                <!-- 动态生成的元素列表 -->
+            </div>
+            
+            <div class="json-output">
+                <div class="panel-title">JSON 输出</div>
+                <textarea class="json-textarea" id="jsonOutput" readonly></textarea>
+                <button class="copy-btn" id="copyBtn">复制</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class TextureAnnotationTool {
+            constructor() {
+                this.canvas = document.getElementById('canvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.canvasContainer = document.getElementById('canvasContainer');
+                this.fileInput = document.getElementById('fileInput');
+                this.elementList = document.getElementById('elementList');
+                this.jsonOutput = document.getElementById('jsonOutput');
+                this.copyBtn = document.getElementById('copyBtn');
+                
+                this.image = null;
+                this.scale = 1;
+                this.offsetX = 0;
+                this.offsetY = 0;
+                this.isDragging = false;
+                this.isAnnotating = false;
+                this.dragStartX = 0;
+                this.dragStartY = 0;
+                this.annotations = [];
+                this.currentAnnotation = null;
+                this.pixelHighlight = null;
+                this.elementCounter = 1;
+                
+                this.initEventListeners();
+            }
+            
+            initEventListeners() {
+                // 文件上传
+                this.canvasContainer.addEventListener('click', () => {
+                    if (!this.image) {
+                        this.fileInput.click();
+                    }
+                });
+                
+                this.canvasContainer.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                });
+                
+                this.canvasContainer.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    const files = e.dataTransfer.files;
+                    if (files.length > 0) {
+                        this.loadImage(files[0]);
+                    }
+                });
+                
+                this.fileInput.addEventListener('change', (e) => {
+                    if (e.target.files.length > 0) {
+                        this.loadImage(e.target.files[0]);
+                    }
+                });
+                
+                // 画布事件
+                this.canvas.addEventListener('mousedown', this.handleMouseDown.bind(this));
+                this.canvas.addEventListener('mousemove', this.handleMouseMove.bind(this));
+                this.canvas.addEventListener('mouseup', this.handleMouseUp.bind(this));
+                this.canvas.addEventListener('wheel', this.handleWheel.bind(this));
+                this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+                
+                // 复制按钮
+                this.copyBtn.addEventListener('click', this.copyJson.bind(this));
+            }
+            
+            loadImage(file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        this.image = img;
+                        this.resetView();
+                        this.canvasContainer.classList.remove('no-image');
+                        this.canvas.style.display = 'block';
+                        this.draw();
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+            
+            resetView() {
+                const containerRect = this.canvasContainer.getBoundingClientRect();
+                const scaleX = (containerRect.width - 40) / this.image.width;
+                const scaleY = (containerRect.height - 40) / this.image.height;
+                this.scale = Math.min(scaleX, scaleY, 1);
+                
+                this.canvas.width = containerRect.width;
+                this.canvas.height = containerRect.height;
+                
+                this.offsetX = (containerRect.width - this.image.width * this.scale) / 2;
+                this.offsetY = (containerRect.height - this.image.height * this.scale) / 2;
+            }
+            
+            getMousePos(e) {
+                const rect = this.canvas.getBoundingClientRect();
+                const x = (e.clientX - rect.left - this.offsetX) / this.scale;
+                const y = (e.clientY - rect.top - this.offsetY) / this.scale;
+                return { x: Math.floor(x), y: Math.floor(y) };
+            }
+            
+            handleMouseDown(e) {
+                if (!this.image) return;
+                
+                const pos = this.getMousePos(e);
+                this.dragStartX = pos.x;
+                this.dragStartY = pos.y;
+                
+                if (e.button === 0) { // 左键
+                    this.isAnnotating = true;
+                    this.currentAnnotation = {
+                        startX: pos.x,
+                        startY: pos.y,
+                        endX: pos.x,
+                        endY: pos.y
+                    };
+                } else if (e.button === 2) { // 右键
+                    this.isDragging = true;
+                }
+            }
+            
+            handleMouseMove(e) {
+                if (!this.image) return;
+                
+                const pos = this.getMousePos(e);
+                
+                // 更新像素高亮
+                this.updatePixelHighlight(pos.x, pos.y);
+                
+                if (this.isAnnotating && this.currentAnnotation) {
+                    this.currentAnnotation.endX = pos.x;
+                    this.currentAnnotation.endY = pos.y;
+                    this.draw();
+                } else if (this.isDragging) {
+                    const deltaX = pos.x - this.dragStartX;
+                    const deltaY = pos.y - this.dragStartY;
+                    this.offsetX += deltaX * this.scale;
+                    this.offsetY += deltaY * this.scale;
+                    this.draw();
+                }
+            }
+            
+            handleMouseUp(e) {
+                if (this.isAnnotating && this.currentAnnotation) {
+                    const annotation = this.currentAnnotation;
+                    const x = Math.min(annotation.startX, annotation.endX);
+                    const y = Math.min(annotation.startY, annotation.endY);
+                    const w = Math.abs(annotation.endX - annotation.startX);
+                    const h = Math.abs(annotation.endY - annotation.startY);
+                    
+                    if (w > 0 && h > 0) {
+                        this.addAnnotation(x, y, w, h);
+                    }
+                    
+                    this.currentAnnotation = null;
+                    this.isAnnotating = false;
+                    this.draw();
+                }
+                
+                this.isDragging = false;
+            }
+            
+            handleWheel(e) {
+                if (!this.image) return;
+                
+                e.preventDefault();
+                const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                const newScale = this.scale * delta;
+                
+                if (newScale >= 0.1 && newScale <= 10) {
+                    const rect = this.canvas.getBoundingClientRect();
+                    const mouseX = e.clientX - rect.left;
+                    const mouseY = e.clientY - rect.top;
+                    
+                    this.offsetX = mouseX - (mouseX - this.offsetX) * delta;
+                    this.offsetY = mouseY - (mouseY - this.offsetY) * delta;
+                    this.scale = newScale;
+                    
+                    this.draw();
+                }
+            }
+            
+            updatePixelHighlight(x, y) {
+                if (x >= 0 && x < this.image.width && y >= 0 && y < this.image.height) {
+                    if (!this.pixelHighlight) {
+                        this.pixelHighlight = document.createElement('div');
+                        this.pixelHighlight.className = 'pixel-highlight';
+                        this.canvasContainer.appendChild(this.pixelHighlight);
+                    }
+                    
+                    const screenX = x * this.scale + this.offsetX;
+                    const screenY = y * this.scale + this.offsetY;
+                    const size = this.scale;
+                    
+                    this.pixelHighlight.style.left = screenX + 'px';
+                    this.pixelHighlight.style.top = screenY + 'px';
+                    this.pixelHighlight.style.width = size + 'px';
+                    this.pixelHighlight.style.height = size + 'px';
+                    this.pixelHighlight.style.display = 'block';
+                } else if (this.pixelHighlight) {
+                    this.pixelHighlight.style.display = 'none';
+                }
+            }
+            
+            addAnnotation(x, y, w, h) {
+                const name = `元素${this.elementCounter++}`;
+                const annotation = { name, x, y, w, h, id: Date.now() };
+                this.annotations.push(annotation);
+                this.updateElementList();
+                this.updateJsonOutput();
+            }
+            
+            removeAnnotation(id) {
+                this.annotations = this.annotations.filter(ann => ann.id !== id);
+                this.updateElementList();
+                this.updateJsonOutput();
+                this.draw();
+            }
+            
+            updateAnnotationName(id, newName) {
+                // 检查名称是否重复
+                const existing = this.annotations.find(ann => ann.id !== id && ann.name === newName);
+                if (existing) {
+                    alert('名称不能重复！');
+                    return false;
+                }
+                
+                const annotation = this.annotations.find(ann => ann.id === id);
+                if (annotation) {
+                    annotation.name = newName;
+                    this.updateJsonOutput();
+                    return true;
+                }
+                return false;
+            }
+            
+            updateElementList() {
+                this.elementList.innerHTML = '';
+                
+                this.annotations.forEach(annotation => {
+                    const item = document.createElement('div');
+                    item.className = 'element-item';
+                    item.dataset.id = annotation.id;
+                    
+                    item.innerHTML = `
+                        <div class="element-name" data-id="${annotation.id}">${annotation.name}</div>
+                        <div class="element-coords">位置: (${annotation.x}, ${annotation.y})</div>
+                        <div class="element-coords">尺寸: ${annotation.w} × ${annotation.h}</div>
+                        <button class="delete-btn" data-id="${annotation.id}">×</button>
+                    `;
+                    
+                    // 悬浮高亮
+                    item.addEventListener('mouseenter', () => {
+                        item.classList.add('highlighted');
+                        this.highlightAnnotation(annotation.id, true);
+                    });
+                    
+                    item.addEventListener('mouseleave', () => {
+                        item.classList.remove('highlighted');
+                        this.highlightAnnotation(annotation.id, false);
+                    });
+                    
+                    // 名称编辑
+                    const nameElement = item.querySelector('.element-name');
+                    nameElement.addEventListener('click', () => {
+                        this.editAnnotationName(nameElement, annotation.id);
+                    });
+                    
+                    // 删除按钮
+                    const deleteBtn = item.querySelector('.delete-btn');
+                    deleteBtn.addEventListener('click', () => {
+                        this.removeAnnotation(annotation.id);
+                    });
+                    
+                    this.elementList.appendChild(item);
+                });
+            }
+            
+            editAnnotationName(element, id) {
+                const currentName = element.textContent;
+                const input = document.createElement('input');
+                input.value = currentName;
+                input.className = 'element-name-input';
+                
+                element.innerHTML = '';
+                element.appendChild(input);
+                input.focus();
+                input.select();
+                
+                const saveEdit = () => {
+                    const newName = input.value.trim();
+                    if (newName && this.updateAnnotationName(id, newName)) {
+                        element.textContent = newName;
+                    } else {
+                        element.textContent = currentName;
+                    }
+                };
+                
+                input.addEventListener('blur', saveEdit);
+                input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        input.blur();
+                    }
+                });
+            }
+            
+            highlightAnnotation(id, highlight) {
+                // 在画布上高亮对应的标注
+                this.draw();
+                if (highlight) {
+                    const annotation = this.annotations.find(ann => ann.id === id);
+                    if (annotation) {
+                        this.ctx.strokeStyle = 'rgba(255, 193, 7, 0.8)';
+                        this.ctx.fillStyle = 'rgba(255, 193, 7, 0.4)';
+                        this.ctx.lineWidth = 1;
+                        
+                        const x = annotation.x * this.scale + this.offsetX;
+                        const y = annotation.y * this.scale + this.offsetY;
+                        const w = annotation.w * this.scale;
+                        const h = annotation.h * this.scale;
+                        
+                        this.ctx.fillRect(x, y, w, h);
+                        this.ctx.strokeRect(x, y, w, h);
+                    }
+                }
+            }
+            
+            updateJsonOutput() {
+                const output = {
+                    elements: this.annotations.map(ann => ({
+                        name: ann.name,
+                        x: ann.x,
+                        y: ann.y,
+                        w: ann.w,
+                        h: ann.h
+                    }))
+                };
+                this.jsonOutput.value = JSON.stringify(output, null, 2);
+            }
+            
+            copyJson() {
+                this.jsonOutput.select();
+                document.execCommand('copy');
+                
+                const originalText = this.copyBtn.textContent;
+                this.copyBtn.textContent = '已复制！';
+                setTimeout(() => {
+                    this.copyBtn.textContent = originalText;
+                }, 1000);
+            }
+            
+            draw() {
+                if (!this.image) return;
+                
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                
+                // 绘制图片
+                this.ctx.imageSmoothingEnabled = false;
+                this.ctx.drawImage(
+                    this.image,
+                    this.offsetX,
+                    this.offsetY,
+                    this.image.width * this.scale,
+                    this.image.height * this.scale
+                );
+                
+                // 绘制图片边框
+                this.ctx.strokeStyle = '#000';
+                this.ctx.lineWidth = 0.5;
+                this.ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+                this.ctx.shadowBlur = 3;
+                this.ctx.shadowOffsetX = 1;
+                this.ctx.shadowOffsetY = 1;
+                this.ctx.strokeRect(
+                    this.offsetX,
+                    this.offsetY,
+                    this.image.width * this.scale,
+                    this.image.height * this.scale
+                );
+                this.ctx.shadowColor = 'transparent';
+                
+                // 绘制已有标注
+                this.annotations.forEach(annotation => {
+                    this.ctx.strokeStyle = 'rgba(0, 123, 255, 0.6)';
+                    this.ctx.fillStyle = 'rgba(0, 123, 255, 0.3)';
+                    this.ctx.lineWidth = 1;
+                    
+                    const x = annotation.x * this.scale + this.offsetX;
+                    const y = annotation.y * this.scale + this.offsetY;
+                    const w = annotation.w * this.scale;
+                    const h = annotation.h * this.scale;
+                    
+                    this.ctx.fillRect(x, y, w, h);
+                    this.ctx.strokeRect(x, y, w, h);
+                });
+                
+                // 绘制当前标注
+                if (this.currentAnnotation) {
+                    this.ctx.strokeStyle = 'rgba(0, 123, 255, 0.6)';
+                    this.ctx.fillStyle = 'rgba(0, 123, 255, 0.3)';
+                    this.ctx.lineWidth = 1;
+                    
+                    const x = Math.min(this.currentAnnotation.startX, this.currentAnnotation.endX) * this.scale + this.offsetX;
+                    const y = Math.min(this.currentAnnotation.startY, this.currentAnnotation.endY) * this.scale + this.offsetY;
+                    const w = Math.abs(this.currentAnnotation.endX - this.currentAnnotation.startX) * this.scale;
+                    const h = Math.abs(this.currentAnnotation.endY - this.currentAnnotation.startY) * this.scale;
+                    
+                    this.ctx.fillRect(x, y, w, h);
+                    this.ctx.strokeRect(x, y, w, h);
+                }
+            }
+        }
+        
+        // 初始化工具
+        const tool = new TextureAnnotationTool();
+    </script>
+</body>
+</html>
